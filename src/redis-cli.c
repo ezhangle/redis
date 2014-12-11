@@ -60,6 +60,8 @@
 #define OUTPUT_CSV 2
 #define REDIS_CLI_KEEPALIVE_INTERVAL 15 /* seconds */
 #define REDIS_CLI_DEFAULT_PIPE_TIMEOUT 30 /* seconds */
+#define REDIS_CLI_HISTFILE_ENV "REDISCLI_HISTFILE"
+#define REDIS_CLI_HISTFILE_DEFAULT ".rediscli_history"
 
 static redisContext *context;
 static struct config {
@@ -136,6 +138,30 @@ static void cliRefreshPrompt(void) {
         len += snprintf(config.prompt+len,sizeof(config.prompt)-len,"[%d]",
             config.dbnum);
     snprintf(config.prompt+len,sizeof(config.prompt)-len,"> ");
+}
+
+static sds getHistoryPath() {
+    char *path = NULL;
+    sds historyPath = NULL;
+
+    /* check the env for a histfile override */
+    path = getenv(REDIS_CLI_HISTFILE_ENV);
+    if (path != NULL && *path != '\0') {
+        if (!strcmp("/dev/null", path)) {
+            return NULL;
+        }
+
+        /* if the env is set, return it */
+        historyPath = sdscatprintf(sdsempty(), "%s", path);
+    } else {
+        char *home = getenv("HOME");
+        if (home != NULL && *home != '\0') {
+            /* otherwise, return the default */
+            historyPath = sdscatprintf(sdsempty(), "%s/%s", home, REDIS_CLI_HISTFILE_DEFAULT);
+        }
+    }
+
+    return historyPath;
 }
 
 /*------------------------------------------------------------------------------
@@ -830,6 +856,7 @@ static void usage(void) {
 "                     not a tty).\n"
 "  --no-raw           Force formatted output even when STDOUT is not a tty.\n"
 "  --csv              Output in CSV format.\n"
+"  --stat             Print rolling stats about server: mem, clients, ...\n"
 "  --latency          Enter a special mode continuously sampling latency.\n"
 "  --latency-history  Like --latency but tracking latency changes over time.\n"
 "                     Default time interval is 15 sec. Change it using -i.\n"
@@ -890,10 +917,9 @@ static void repl(void) {
 
     /* Only use history when stdin is a tty. */
     if (isatty(fileno(stdin))) {
-        history = 1;
-
-        if (getenv("HOME") != NULL) {
-            historyfile = sdscatprintf(sdsempty(),"%s/.rediscli_history",getenv("HOME"));
+        historyfile = getHistoryPath();
+        if (historyfile != NULL) {
+            history = 1;
             linenoiseHistoryLoad(historyfile);
         }
     }
@@ -1915,8 +1941,6 @@ int main(int argc, char **argv) {
     argc -= firstarg;
     argv += firstarg;
 
-    signal(SIGPIPE, SIG_IGN);
-
     /* Latency mode */
     if (config.latency_mode) {
         if (cliConnect(0) == REDIS_ERR) exit(1);
@@ -1965,6 +1989,9 @@ int main(int argc, char **argv) {
 
     /* Start interactive mode when no command is provided */
     if (argc == 0 && !config.eval) {
+        /* Ignore SIGPIPE in interactive mode to force a reconnect */
+        signal(SIGPIPE, SIG_IGN);
+
         /* Note that in repl mode we don't abort on connection error.
          * A new attempt will be performed for every command send. */
         cliConnect(0);

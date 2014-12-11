@@ -301,7 +301,7 @@ void debugCommand(redisClient *c) {
             "lru:%d lru_seconds_idle:%llu",
             (void*)val, val->refcount,
             strenc, (long long) rdbSavedObjectLen(val),
-            val->lru, estimateObjectIdleTime(val));
+            val->lru, estimateObjectIdleTime(val)/1000);
     } else if (!strcasecmp(c->argv[1]->ptr,"sdslen") && c->argc == 3) {
         dictEntry *de;
         robj *val;
@@ -338,7 +338,7 @@ void debugCommand(redisClient *c) {
             snprintf(buf,sizeof(buf),"%s:%lu",
                 (c->argc == 3) ? "key" : (char*)c->argv[3]->ptr, j);
             key = createStringObject(buf,strlen(buf));
-            if (lookupKeyRead(c->db,key) != NULL) {
+            if (lookupKeyWrite(c->db,key) != NULL) {
                 decrRefCount(key);
                 continue;
             }
